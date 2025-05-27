@@ -1,0 +1,791 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Property {
+  id                  String   @id @default(cuid())
+  address             String
+  street_number       String?
+  street_name         String?
+  city                String
+  state               String
+  zip_code            String
+  county              String?
+  parcel_id           String?
+  units               Int?
+  sq_ft               Int?
+  lot_size_sq_ft      Int?
+  year_built          Int?
+  property_type       String?  // commercial, multifamily, etc.
+  property_subtype    String?  // apartment, office, retail, etc.
+  listing_price       Float?
+  description         String?
+  listing_source      String?
+  listing_url         String?
+  tax_assessor_url    String?
+  last_tax_update     DateTime?
+  latitude            Float?
+  longitude           Float?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  // Relationships
+  tax_assessments       TaxAssessment[]
+  tax_payments          TaxPayment[]
+  underwriting_analysis UnderwritingAnalysis[]
+  financial_scenarios   FinancialScenario[]
+  comparable_sales      ComparableSale[]
+
+  @@index([zip_code])
+  @@index([county, state])
+  @@index([parcel_id])
+}
+
+model TaxAssessment {
+  id                  String   @id @default(cuid())
+  property_id         String
+  assessment_year     Int
+  assessed_value      Float?
+  land_value          Float?
+  improvement_value   Float?
+  total_value         Float?
+  tax_rate            Float?   // as decimal (e.g., 0.0125 for 1.25%)
+  annual_taxes        Float?
+  assessment_date     DateTime?
+  exemptions          String?  // JSON string of exemptions
+  property_class      String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  property            Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, assessment_year])
+}
+
+model TaxPayment {
+  id              String   @id @default(cuid())
+  property_id     String
+  tax_year        Int
+  amount_due      Float?
+  amount_paid     Float?
+  payment_date    DateTime?
+  due_date        DateTime?
+  penalty_fees    Float?
+  interest_fees   Float?
+  status          String?  // paid, unpaid, partial, delinquent
+  installment     Int?     // for properties with payment plans
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  property        Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, tax_year])
+}
+
+model TaxAssessorSource {
+  id                      String   @id @default(cuid())
+  county                  String
+  state                   String
+  assessor_name           String?
+  assessor_url            String
+  search_url_pattern      String?  // URL pattern for searches
+  search_method           String?  // address, parcel_id, owner_name
+  data_format             String?  // JSON description of data structure
+  selectors               String?  // JSON of CSS selectors for scraping
+  requires_javascript     Boolean  @default(false)
+  requires_authentication Boolean  @default(false)
+  rate_limit_ms           Int      @default(2000)
+  last_successful_scrape  DateTime?
+  last_failed_scrape      DateTime?
+  success_count           Int      @default(0)
+  failure_count           Int      @default(0)
+  is_active               Boolean  @default(true)
+  notes                   String?
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  @@unique([county, state])
+  @@index([state])
+}
+
+model ZipCodeMapping {
+  id          String   @id @default(cuid())
+  zip_code    String   @unique
+  city        String
+  state       String
+  county      String
+  latitude    Float?
+  longitude   Float?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([state, county])
+}
+
+model UnderwritingAnalysis {
+  id                          String   @id @default(cuid())
+  property_id                 String
+  analysis_date               DateTime @default(now())
+  
+  // Basic Property Info
+  purchase_price              Float?
+  down_payment_percent        Float?
+  loan_amount                 Float?
+  interest_rate               Float?
+  loan_term_years             Int?
+  
+  // Income Analysis
+  gross_rental_income         Float?
+  vacancy_rate                Float?
+  effective_gross_income      Float?
+  
+  // Expense Analysis
+  property_taxes              Float?
+  insurance                   Float?
+  property_management         Float?
+  maintenance_repairs         Float?
+  utilities                   Float?
+  other_expenses              Float?
+  total_expenses              Float?
+  
+  // Financial Metrics
+  net_operating_income        Float?
+  cap_rate                    Float?
+  cash_flow                   Float?
+  cash_on_cash_return         Float?
+  debt_service_coverage       Float?
+  
+  // Tax-Enhanced Metrics
+  effective_tax_rate          Float?   // calculated from actual tax payments
+  tax_assessed_vs_market      Float?   // ratio of assessed value to purchase price
+  tax_trend_3_year            Float?   // 3-year tax increase trend
+  tax_appeal_potential        Boolean? // if assessed value significantly higher than market
+  
+  created_at                  DateTime @default(now())
+  updated_at                  DateTime @updatedAt
+
+  property                    Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id])
+}
+
+model ScrapeJob {
+  id              String   @id @default(cuid())
+  job_type        String   // tax_assessor, property_listing, market_data
+  target_url      String?
+  zip_code        String?
+  property_id     String?
+  status          String   // pending, running, completed, failed
+  started_at      DateTime?
+  completed_at    DateTime?
+  error_message   String?
+  retry_count     Int      @default(0)
+  max_retries     Int      @default(3)
+  priority        Int      @default(1)   // 1 = highest, 5 = lowest
+  results         String?  // JSON string of scraped data
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([status, priority])
+  @@index([job_type])
+}
+
+model Address {
+  id                  String   @id @default(cuid())
+  original_address    String
+  normalized_address  String
+  street_number       String?
+  street_name         String?
+  unit_number         String?
+  city                String?
+  state               String?
+  zip_code            String?
+  zip_plus_four       String?
+  county              String?
+  latitude            Float?
+  longitude           Float?
+  confidence_score    Float?   // 0-1, how confident we are in the normalization
+  created_at          DateTime @default(now())
+
+  @@unique([normalized_address])
+  @@index([zip_code])
+}
+
+// Market Data by Region
+model MarketData {
+  id                    String   @id @default(cuid())
+  zip_code              String?
+  county                String?
+  metro_area            String?
+  region                String?
+  state                 String?
+  
+  // Cap Rates by Property Type
+  multifamily_cap_rate  Float?
+  office_cap_rate       Float?
+  retail_cap_rate       Float?
+  industrial_cap_rate   Float?
+  
+  // Market Metrics
+  avg_rent_per_unit     Float?
+  avg_rent_per_sqft     Float?
+  vacancy_rate          Float?
+  absorption_rate       Float?
+  
+  // Market Trends
+  price_appreciation    Float?   // YoY percentage
+  rent_growth           Float?   // YoY percentage
+  inventory_months      Float?   // Months of inventory
+  
+  // Economic Indicators
+  population_growth     Float?
+  employment_growth     Float?
+  median_income         Float?
+  
+  data_source           String   // realtyrates, milken, marcus_millichap
+  data_type             String   // cap_rates, market_trends, economic
+  measurement_date      DateTime
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@index([zip_code, data_source])
+  @@index([metro_area, data_source])
+  @@index([measurement_date])
+}
+
+// Comparable Sales Data
+model ComparableSale {
+  id                String   @id @default(cuid())
+  property_id       String?   // Reference property for comparison
+  sale_property_id  String?   // Actual sold property
+  
+  // Property Details
+  address           String
+  city              String
+  state             String
+  zip_code          String
+  property_type     String
+  units             Int?
+  sq_ft             Int?
+  year_built        Int?
+  
+  // Sale Information
+  sale_price        Float
+  sale_date         DateTime
+  price_per_unit    Float?
+  price_per_sqft    Float?
+  cap_rate          Float?
+  
+  // Market Context
+  days_on_market    Int?
+  listing_price     Float?
+  price_reduction   Float?
+  
+  // Data Source
+  transaction_source String   // mls, public_records, marcus_millichap
+  confidence_score   Float?   // How comparable this sale is
+  
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  property          Property? @relation(fields: [property_id], references: [id])
+
+  @@index([zip_code, sale_date])
+  @@index([property_type, sale_date])
+}
+
+// Market Research Reports
+model ResearchReport {
+  id                String   @id @default(cuid())
+  title             String
+  report_type       String   // market_report, forecast, survey, transaction_report
+  metro_area        String?
+  region            String?
+  property_type     String?
+  
+  // Report Content
+  summary           String?
+  key_findings      String?  // JSON array of key findings
+  market_outlook    String?
+  investment_themes String?  // JSON array
+  
+  // Publication Info
+  publication_date  DateTime
+  author            String?
+  source            String   // marcus_millichap, milken_institute, realtyrates
+  source_url        String?
+  
+  // Data Extraction
+  extracted_data    String?  // JSON of structured data from report
+  
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([publication_date, source])
+  @@index([metro_area, property_type])
+}
+
+// Economic Indicators
+model EconomicIndicator {
+  id                String   @id @default(cuid())
+  metro_area        String
+  region            String?
+  state             String?
+  
+  // Indicator Details
+  indicator_type    String   // gdp_growth, employment_rate, population_growth, etc.
+  indicator_name    String
+  value             Float
+  unit              String?  // percentage, dollars, count, etc.
+  
+  // Time Context
+  measurement_date  DateTime
+  measurement_period String? // Q1_2024, annual_2024, monthly_jan_2024
+  
+  // Trend Analysis
+  previous_value    Float?
+  change_amount     Float?
+  change_percent    Float?
+  trend_direction   String?  // up, down, stable
+  
+  // Data Source
+  source            String   // milken_institute, bls, census, fred
+  source_url        String?
+  confidence_level  String?  // high, medium, low
+  
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([metro_area, indicator_type])
+  @@index([measurement_date, source])
+}
+
+// Financial Analysis Scenarios
+model FinancialScenario {
+  id                      String   @id @default(cuid())
+  property_id             String
+  scenario_name           String   // base_case, optimistic, pessimistic
+  
+  // Assumptions
+  purchase_price          Float
+  down_payment_percent    Float
+  interest_rate           Float
+  loan_term_years         Int
+  
+  // Income Projections (10-year)
+  year_1_gross_income     Float
+  annual_rent_growth      Float
+  vacancy_rate            Float
+  
+  // Expense Projections
+  year_1_expenses         Float
+  annual_expense_growth   Float
+  capex_reserve_percent   Float
+  
+  // Exit Assumptions
+  exit_year               Int?
+  exit_cap_rate           Float?
+  selling_costs_percent   Float?
+  
+  // Calculated Results
+  irr                     Float?
+  npv                     Float?
+  equity_multiple         Float?
+  average_coc_return      Float?
+  
+  // Risk Metrics
+  break_even_occupancy    Float?
+  sensitivity_score       Float?   // 1-10, how sensitive to assumptions
+  
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  property                Property @relation(fields: [property_id], references: [id], onDelete: Cascade)
+
+  @@index([property_id, scenario_name])
+}
+
+// Institutional Properties from Major CRE Firms
+model InstitutionalProperty {
+  id                    String   @id @default(cuid())
+  source                String   // cbre, colliers, jll, cushman_wakefield
+  property_id           String   // Original property ID from source
+  external_url          String?  // Link to original listing
+  
+  // Property Details
+  address               String
+  street_number         String?
+  street_name           String?
+  unit_number           String?
+  city                  String
+  state                 String
+  zip_code              String
+  county                String?
+  
+  // Property Information
+  property_type         String   // multifamily, office, retail, industrial, etc.
+  property_subtype      String?  // garden_style, high_rise, strip_center, etc.
+  units                 Int?
+  sq_ft                 Int?
+  lot_size_sq_ft        Int?
+  year_built            Int?
+  
+  // Financial Information
+  listing_price         Float?
+  price_per_unit        Float?
+  price_per_sqft        Float?
+  cap_rate              Float?
+  noi                   Float?   // Net Operating Income
+  gross_income          Float?
+  expenses              Float?
+  
+  // Listing Details
+  listing_agent         String?
+  listing_firm          String?
+  market_area           String?
+  description           String?
+  status                String?  // active, under_contract, sold, off_market
+  
+  // Geographic Data
+  latitude              Float?
+  longitude             Float?
+  
+  // Data Quality
+  data_confidence       Float?   // 0-1 score of data quality
+  last_verified         DateTime?
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([source, property_id])
+  @@index([zip_code, property_type])
+  @@index([source, status])
+  @@index([listing_price])
+}
+
+// Market Research Reports from Institutional Sources
+model MarketResearchReport {
+  id                    String   @id @default(cuid())
+  source                String   // cbre, colliers, jll, cushman_wakefield
+  report_id             String?  // Original report ID from source
+  
+  // Report Information
+  title                 String
+  report_type           String   // market_outlook, cap_rate_survey, investment_trends, etc.
+  market_area           String?  // metro area, region, or national
+  property_type         String?  // focus property type if applicable
+  
+  // Content
+  summary               String?
+  key_findings          String?  // JSON array of key findings
+  market_outlook        String?
+  investment_themes     String?  // JSON array of investment themes
+  cap_rate_data         String?  // JSON of cap rate information
+  economic_indicators   String?  // JSON of relevant economic data
+  
+  // Publication Details
+  publication_date      DateTime
+  author                String?
+  download_url          String?
+  source_url            String?
+  
+  // Extracted Metrics
+  extracted_metrics     String?  // JSON of quantitative data extracted
+  
+  // Data Quality
+  extraction_confidence Float?   // 0-1 score of extraction quality
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([source, title, publication_date])
+  @@index([publication_date, source])
+  @@index([market_area, property_type])
+  @@index([report_type])
+}
+
+// Transaction Data from Institutional Sources
+model InstitutionalTransaction {
+  id                    String   @id @default(cuid())
+  source                String   // cbre, colliers, jll, cushman_wakefield
+  transaction_id        String?  // Original transaction ID from source
+  
+  // Property Information
+  property_address      String
+  city                  String
+  state                 String
+  zip_code              String
+  property_type         String
+  property_subtype      String?
+  
+  // Property Details
+  units                 Int?
+  sq_ft                 Int?
+  year_built            Int?
+  
+  // Transaction Details
+  sale_price            Float
+  sale_date             DateTime
+  price_per_unit        Float?
+  price_per_sqft        Float?
+  cap_rate              Float?
+  
+  // Parties
+  buyer                 String?
+  seller                String?
+  broker                String?
+  
+  // Market Context
+  days_on_market        Int?
+  listing_price         Float?
+  price_change          Float?   // Difference from listing to sale
+  
+  // Investment Details
+  financing_type        String?  // cash, conventional, bridge, etc.
+  investor_type         String?  // institutional, private, reit, etc.
+  
+  // Data Quality
+  data_confidence       Float?   // 0-1 score of data reliability
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([source, property_address, sale_date])
+  @@index([zip_code, sale_date])
+  @@index([property_type, sale_date])
+  @@index([sale_price])
+}
+
+// Enhanced Market Data with Institutional Sources
+model InstitutionalMarketData {
+  id                    String   @id @default(cuid())
+  source                String   // cbre, colliers, jll, cushman_wakefield
+  
+  // Geographic Scope
+  zip_code              String?
+  county                String?
+  metro_area            String?
+  region                String?
+  state                 String?
+  
+  // Cap Rates by Property Type
+  multifamily_cap_rate  Float?
+  office_cap_rate       Float?
+  retail_cap_rate       Float?
+  industrial_cap_rate   Float?
+  hotel_cap_rate        Float?
+  
+  // Market Metrics
+  avg_rent_per_unit     Float?
+  avg_rent_per_sqft     Float?
+  vacancy_rate          Float?
+  absorption_rate       Float?
+  
+  // Investment Metrics
+  avg_price_per_unit    Float?
+  avg_price_per_sqft    Float?
+  transaction_volume    Float?   // Total $ volume of transactions
+  transaction_count     Int?     // Number of transactions
+  
+  // Market Trends (YoY)
+  cap_rate_trend        Float?   // Change in cap rates
+  rent_growth           Float?   // Rent growth percentage
+  price_appreciation    Float?   // Price appreciation percentage
+  
+  // Market Activity
+  inventory_months      Float?   // Months of supply
+  time_on_market        Float?   // Average days on market
+  
+  // Quality Indicators
+  market_velocity       String?  // hot, moderate, slow
+  investor_sentiment    String?  // bullish, neutral, bearish
+  
+  // Data Metadata
+  measurement_date      DateTime
+  data_confidence       Float?   // 0-1 score of data reliability
+  sample_size           Int?     // Number of properties in sample
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([source, zip_code, metro_area, measurement_date])
+  @@index([metro_area, source])
+  @@index([measurement_date])
+}
+
+// Institutional Firm Configurations
+model InstitutionalSource {
+  id                    String   @id @default(cuid())
+  name                  String   @unique // cbre, colliers, jll, cushman_wakefield
+  display_name          String   // CBRE, Colliers, JLL, Cushman & Wakefield
+  base_url              String
+  
+  // Scraping Configuration
+  properties_url        String?  // URL pattern for property listings
+  research_url          String?  // URL pattern for research reports
+  transactions_url      String?  // URL pattern for transaction data
+  market_data_url       String?  // URL pattern for market data
+  
+  // Technical Settings
+  requires_javascript   Boolean  @default(true)
+  rate_limit_per_minute Int      @default(20)
+  request_delay_ms      Int      @default(3000)
+  timeout_ms            Int      @default(30000)
+  
+  // Authentication
+  requires_auth         Boolean  @default(false)
+  auth_type             String?  // cookies, token, basic
+  login_url             String?
+  
+  // Data Extraction
+  selectors             String?  // JSON of CSS selectors for each data type
+  field_mappings        String?  // JSON mapping source fields to our schema
+  
+  // Anti-Bot Measures
+  captcha_detection     String?  // JSON of captcha detection rules
+  user_agents           String?  // JSON array of rotating user agents
+  proxy_required        Boolean  @default(false)
+  
+  // Status & Monitoring
+  is_active             Boolean  @default(true)
+  last_successful_scrape DateTime?
+  last_error            String?
+  success_rate          Float?   // percentage over last 100 requests
+  avg_response_time     Float?   // average response time in ms
+  
+  // Compliance
+  robots_txt_compliant  Boolean  @default(true)
+  terms_acceptance_date DateTime?
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@index([is_active])
+}
+
+// Enhanced Scrape Jobs for Institutional Sources
+model InstitutionalScrapeJob {
+  id                    String   @id @default(cuid())
+  source                String   // cbre, colliers, jll, cushman_wakefield
+  job_type              String   // properties, research, transactions, market_data
+  
+  // Job Parameters
+  target_url            String?
+  zip_code              String?
+  metro_area            String?
+  property_type         String?
+  search_params         String?  // JSON of search parameters
+  
+  // Job Control
+  priority              Int      @default(1)   // 1 = highest, 5 = lowest
+  max_retries           Int      @default(3)
+  retry_count           Int      @default(0)
+  timeout_ms            Int      @default(30000)
+  
+  // Status Tracking
+  status                String   // pending, running, completed, failed, cancelled
+  started_at            DateTime?
+  completed_at          DateTime?
+  processing_time_ms    Int?
+  
+  // Results
+  results_count         Int      @default(0)
+  results               String?  // JSON string of scraped data
+  error_message         String?
+  
+  // Quality Control
+  data_quality_score    Float?   // 0-1 score of scraped data quality
+  validation_errors     String?  // JSON array of validation issues
+  
+  // Metadata
+  user_agent            String?
+  ip_address            String?
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@index([status, priority])
+  @@index([source, job_type])
+  @@index([created_at])
+}
+
+// Data Quality Tracking
+model DataQualityReport {
+  id                    String   @id @default(cuid())
+  source                String   // institutional source name
+  data_type             String   // properties, research, transactions, market_data
+  
+  // Quality Metrics
+  total_records         Int
+  valid_records         Int
+  invalid_records       Int
+  duplicate_records     Int
+  missing_required_fields Int
+  
+  // Data Freshness
+  avg_data_age_days     Float?
+  oldest_record_date    DateTime?
+  newest_record_date    DateTime?
+  
+  // Validation Results
+  price_validation_rate Float?   // % of price data that passes validation
+  address_validation_rate Float? // % of addresses that geocode successfully
+  completeness_score    Float?   // % of required fields populated
+  
+  // Trends
+  quality_trend         String?  // improving, stable, declining
+  volume_trend          String?  // increasing, stable, decreasing
+  
+  // Report Metadata
+  report_date           DateTime @default(now())
+  report_period_start   DateTime
+  report_period_end     DateTime
+  
+  created_at            DateTime @default(now())
+
+  @@index([source, report_date])
+  @@index([data_type, report_date])
+}
+
+// External Data Sources Configuration
+model DataSource {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  type                  String   // tax_assessor, market_data, listings, research, institutional
+  base_url              String
+  
+  // API Configuration
+  api_key_required      Boolean  @default(false)
+  rate_limit_per_minute Int      @default(60)
+  request_delay_ms      Int      @default(1000)
+  
+  // Scraping Configuration
+  requires_javascript   Boolean  @default(false)
+  user_agent            String?
+  headers               String?  // JSON of required headers
+  selectors             String?  // JSON of CSS selectors
+  
+  // Data Mapping
+  field_mappings        String?  // JSON mapping source fields to our schema
+  data_transformations  String?  // JSON of transformation rules
+  
+  // Status & Monitoring
+  is_active             Boolean  @default(true)
+  last_successful_fetch DateTime?
+  last_error            String?
+  success_rate          Float?   // percentage over last 100 requests
+  
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@index([type, is_active])
+}
+
