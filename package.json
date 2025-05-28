@@ -6,7 +6,7 @@
     "dev": "next dev -H 0.0.0.0 --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "bunx biome lint --write && bunx tsc --noEmit",
+    "lint": "next lint",
     "format": "bunx biome format --write",
     "db:generate": "bunx prisma generate",
     "db:push": "bunx prisma db push",
